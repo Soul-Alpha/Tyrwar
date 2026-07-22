@@ -21,7 +21,16 @@ class MT5Adapter:
         self.live_enabled = live_enabled
         self._mt5: Any | None = None
 
-    def connect(self) -> None:
+    def connect(
+        self,
+        *,
+        login: int | None = None,
+        password: str | None = None,
+        server: str | None = None,
+        terminal_path: str | None = None,
+    ) -> None:
+        """Connect to a local MT5 terminal, optionally authenticating an account."""
+
         try:
             import MetaTrader5 as mt5
         except ImportError as exc:
@@ -29,7 +38,15 @@ class MT5Adapter:
                 "MetaTrader5 is not installed; install the mt5 extra on Windows"
             ) from exc
 
-        if not mt5.initialize():
+        kwargs: dict[str, Any] = {}
+        if login is not None:
+            kwargs["login"] = login
+        if password is not None:
+            kwargs["password"] = password
+        if server is not None:
+            kwargs["server"] = server
+        initialized = mt5.initialize(terminal_path, **kwargs) if terminal_path else mt5.initialize(**kwargs)
+        if not initialized:
             raise MT5UnavailableError(f"MT5 initialize failed: {mt5.last_error()}")
         if not mt5.symbol_select(self.symbol, True):
             mt5.shutdown()
@@ -40,6 +57,27 @@ class MT5Adapter:
         if self._mt5 is not None:
             self._mt5.shutdown()
             self._mt5 = None
+
+    def account_status(self) -> dict[str, Any]:
+        """Return redacted account and terminal monitoring fields."""
+
+        mt5 = self._require_connection()
+        account = mt5.account_info()
+        terminal = mt5.terminal_info()
+        if account is None or terminal is None:
+            raise MT5UnavailableError(f"MT5 status fetch failed: {mt5.last_error()}")
+        positions = mt5.positions_get(symbol=self.symbol)
+        return {
+            "connected": "Online",
+            "account": str(account.login),
+            "server": str(account.server),
+            "balance": round(float(account.balance), 2),
+            "equity": round(float(account.equity), 2),
+            "margin_free": round(float(account.margin_free), 2),
+            "positions": len(positions or ()),
+            "trade_allowed": bool(terminal.trade_allowed),
+            "symbol": self.symbol,
+        }
 
     def fetch_closed_m5_candles(self, count: int = 250) -> list[Candle]:
         """Fetch completed M5 candles, deliberately excluding the open candle at index zero."""
