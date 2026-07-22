@@ -5,12 +5,18 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "tyrwar"
 version = "0.1.0"
-description = "Tyrwar Python project"
+description = "XAUUSD M5 RSI and SMC trading bot"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
 
+[project.scripts]
+tyrwar-bot = "tyrwar.cli:main"
+
 [project.optional-dependencies]
+mt5 = [
+  "MetaTrader5>=5.0.45; platform_system == 'Windows'",
+]
 dev = [
   "pytest>=8,<9",
   "ruff>=0.9,<1",
