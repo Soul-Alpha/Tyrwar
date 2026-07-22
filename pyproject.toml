@@ -8,10 +8,17 @@ version = "0.1.0"
 description = "XAUUSD M5 RSI and SMC trading bot"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+  "fastapi>=0.115,<1",
+  "httpx>=0.28,<1",
+  "python-multipart>=0.0.20,<1",
+  "uvicorn[standard]>=0.34,<1",
+]
 
 [project.scripts]
 tyrwar-bot = "tyrwar.cli:main"
+tyrwar-dashboard = "tyrwar.dashboard.run:main"
+tyrwar-bridge = "tyrwar.bridge.run:main"
 
 [project.optional-dependencies]
 mt5 = [

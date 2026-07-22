@@ -1,0 +1,5 @@
+run = "python -m tyrwar.dashboard.run"
+
+[deployment]
+run = ["sh", "-c", "python -m tyrwar.dashboard.run"]
+build = ["sh", "-c", "python -m pip install -e ."]
