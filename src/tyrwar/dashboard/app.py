@@ -2,16 +2,64 @@
 
 from __future__ import annotations
 
+import json
 import os
 import secrets
+import sqlite3
 from datetime import datetime, timezone
-from typing import Any, Annotated
+from pathlib import Path
+from typing import Annotated, Any
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 
 app = FastAPI(title="Tyrwar Bot Monitor", docs_url=None, redoc_url=None)
 LATEST: dict[str, Any] = {}
+
+
+def _database_path() -> Path:
+    return Path(os.getenv("TYRWAR_TELEMETRY_DB_PATH", "data/telemetry.db"))
+
+
+def _connect_database() -> sqlite3.Connection:
+    path = _database_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS latest_telemetry (id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL)"
+    )
+    return connection
+
+
+def _persist(snapshot: dict[str, Any]) -> None:
+    with _connect_database() as connection:
+        connection.execute(
+            "INSERT INTO latest_telemetry (id, payload) VALUES (1, ?) "
+            "ON CONFLICT(id) DO UPDATE SET payload = excluded.payload",
+            (json.dumps(snapshot),),
+        )
+
+
+def _restore() -> dict[str, Any]:
+    if LATEST:
+        return dict(LATEST)
+    try:
+        with _connect_database() as connection:
+            row = connection.execute(
+                "SELECT payload FROM latest_telemetry WHERE id = 1"
+            ).fetchone()
+    except (OSError, sqlite3.Error):
+        return {}
+    if row is None:
+        return {}
+    try:
+        restored = json.loads(row[0])
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    if isinstance(restored, dict):
+        LATEST.update(restored)
+        return dict(restored)
+    return {}
 
 
 def _require_key(x_tyrwar_telemetry_key: Annotated[str | None, Header()] = None) -> None:
@@ -57,16 +105,21 @@ def ingest(
         "feature_store_observations",
         "runtime_status",
     }
+    accepted = {key: value for key, value in snapshot.items() if key in allowed}
     LATEST.clear()
-    LATEST.update({key: value for key, value in snapshot.items() if key in allowed})
+    LATEST.update(accepted)
+    try:
+        _persist(accepted)
+    except (OSError, sqlite3.Error) as exc:
+        raise HTTPException(503, f"Telemetry persistence failed: {exc}") from exc
     return {"status": "accepted"}
 
 
 @app.get("/api/status")
 def status() -> JSONResponse:
-    if not LATEST:
+    data = _restore()
+    if not data:
         return JSONResponse({"connection": "Offline", "message": "No telemetry received."})
-    data = dict(LATEST)
     age = _age_seconds(data)
     stale_after = int(os.getenv("TYRWAR_STALE_AFTER_SECONDS", "90"))
     data["heartbeat_age_seconds"] = round(age, 1) if age is not None else None
