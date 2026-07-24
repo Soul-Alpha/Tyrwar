@@ -1,112 +1,70 @@
 # Tyrwar
 
-Tyrwar is an XAUUSD five-minute trading bot built around deterministic RSI confirmation and SMC-inspired liquidity-sweep and market-structure rules.
+Tyrwar is an XAUUSD five-minute trading system built around deterministic RSI confirmation and SMC-inspired liquidity-sweep and market-structure rules.
 
 ## Safety status
 
-The bot is paper/evaluation-only by default. Live order submission requires both:
+Tyrwar is evaluation-only by default. Live order submission requires both `--execute` and `TYRWAR_LIVE_TRADING=I_UNDERSTAND_THE_RISK`. Use a demo account until the complete validation and capital-governance programme is satisfied.
 
-1. `--execute` on the command line; and
-2. `TYRWAR_LIVE_TRADING=I_UNDERSTAND_THE_RISK` in the environment.
+## Canonical architecture
 
-Start with a demo account. The strategy has not yet been validated for profitability and should not be treated as financial advice.
+```text
+Windows MT5 runtime -> authenticated telemetry -> Replit dashboard -> browser
+```
 
-## Strategy
+Production logic has one authoritative location: `src/tyrwar/`.
 
-The bot evaluates completed M5 candles only. It deliberately excludes the currently forming candle.
+```text
+.github/workflows/        Continuous integration
+docs/                     Architecture and operating documentation
+notebooks/                Thin operator interfaces; no trading logic
+src/tyrwar/bridge/        Authenticated MT5 monitoring bridge
+src/tyrwar/dashboard/     Replit dashboard and persistent latest telemetry
+src/tyrwar/telemetry/     Resilient telemetry publisher
+src/tyrwar/trading/       Strategy, models, MT5 adapter, and bot cycle
+src/tyrwar/cli.py         Shared CLI and notebook runtime
+tests/                    Behavioural and repository-policy tests
+```
 
-A buy requires:
-
-- a downside liquidity sweep on the preceding completed candle;
-- a bullish break of recent structure on the latest completed candle;
-- RSI at or below the configured oversold threshold;
-- a valid stop below the swept low.
-
-A sell applies the inverse conditions. Take profit defaults to 2R. The default order volume is `0.01`, but fixed-volume execution is an initial safety baseline rather than a complete account-risk model.
+See `docs/REPOSITORY_LAYOUT.md` for the structural contract. A Replit wrapper such as `cuddly-train/` or a nested clone such as `Tyrwar/Tyrwar/` is not part of the canonical repository.
 
 ## Installation
 
 Requirements:
 
 - Python 3.11 or newer;
-- Windows with a working MetaTrader 5 terminal for MT5 connectivity.
-
-Install development tools:
+- Windows and a working MetaTrader 5 terminal for MT5 connectivity.
 
 ```bash
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[dev,mt5]"
 ```
 
-Install the optional MT5 integration on Windows:
-
-```bash
-python -m pip install -e ".[mt5]"
-```
-
-## Usage
-
-Evaluate the latest completed candles without placing an order:
-
-```bash
-tyrwar-bot --symbol XAUUSD
-```
-
-Some brokers use a suffix, for example:
+## Evaluation usage
 
 ```bash
 tyrwar-bot --symbol XAUUSDm
 ```
 
-Live execution is deliberately guarded:
-
-```bash
-set TYRWAR_LIVE_TRADING=I_UNDERSTAND_THE_RISK
-tyrwar-bot --symbol XAUUSD --volume 0.01 --execute
-```
-
-## Replit monitoring dashboard
-
-The dashboard is designed for Replit, while the MT5 connection remains on a Windows machine or Windows VPS running the MetaTrader 5 terminal.
-
-Architecture:
+Telemetry starts automatically when both variables are present:
 
 ```text
-Browser -> Replit dashboard -> HTTPS MT5 bridge -> local MetaTrader 5 terminal
+TYRWAR_TELEMETRY_URL=https://your-replit-deployment.replit.app
+TYRWAR_TELEMETRY_KEY=<shared-secret>
 ```
 
-This separation is required because the official MetaTrader5 Python integration communicates directly with the installed MT5 terminal and its published wheels are Windows builds.
+Telemetry failure is non-fatal and is reported in each runtime snapshot.
 
-### Replit
+## Edith notebook
 
-1. Import this GitHub repository into Replit.
-2. Select the `feature/xauusd-m5-rsi-smc` branch until the pull request is merged.
-3. Replit uses the included `.replit` configuration to install the package and start the dashboard on `0.0.0.0:$PORT`.
-4. Publish it as an Autoscale deployment for interactive monitoring, or Reserved VM when predictable always-on dashboard availability is required.
+`notebooks/edith.ipynb` is a governed operator interface. It imports `run_tyrwar()` from the canonical package and contains no independent strategy, order-management, credentials, or telemetry implementation.
 
-The dashboard contains connection fields for:
+Run the one-cycle evaluation cell before starting continuous evaluation. Notebook outputs and execution counts must not be committed.
 
-- secure bridge URL;
-- bridge API key;
-- MT5 account number;
-- MT5 password;
-- broker server;
-- broker symbol.
+## Replit
 
-The MT5 password is forwarded to the bridge for authentication and is not stored in the dashboard session or written to disk. The bridge returns an opaque monitoring session token.
+Import this GitHub repository directly into Replit. The Replit workspace root must be the directory containing `.replit`, `pyproject.toml`, `src/`, and `tests/`. Do not clone Tyrwar inside an existing Replit project.
 
-### Windows MT5 bridge
-
-On the Windows host running MetaTrader 5:
-
-```powershell
-python -m pip install -e ".[mt5]"
-$env:TYRWAR_BRIDGE_API_KEY="replace-with-a-long-random-secret"
-tyrwar-bridge
-```
-
-The bridge binds to `127.0.0.1:8090` by default. For a remote Replit deployment, expose it only through an authenticated HTTPS reverse proxy or secure tunnel. Do not expose the raw bridge port directly to the public internet.
-
-The current bridge is monitoring-only. It exposes account status, XAUUSD open-position count, completed-candle time, RSI, and the latest strategy signal. It does not expose a remote order-placement endpoint.
+The included `.replit` file installs the package and starts the dashboard. The latest accepted telemetry snapshot is persisted so a process restart does not erase the last known state.
 
 ## Validation
 
@@ -116,21 +74,8 @@ ruff format --check .
 pytest
 ```
 
-## Structure
+Repository tests enforce the notebook policy and prevent executable duplication from being reintroduced.
 
-```text
-src/tyrwar/trading/               Strategy, models, MT5 adapter, and bot cycle
-src/tyrwar/dashboard/app.py       Replit monitoring dashboard
-src/tyrwar/dashboard/run.py       Replit/Uvicorn process runner
-src/tyrwar/bridge/app.py          Authenticated Windows MT5 monitoring bridge
-src/tyrwar/bridge/run.py          Windows bridge process runner
-src/tyrwar/cli.py                 Trading command-line entry point
-tests/                            Automated tests
-.github/workflows/                Continuous integration
-```
+## Production readiness
 
-## Required before production use
-
-Before enabling unattended live execution, add historical backtesting, spread and slippage filters, position sizing based on account risk, daily drawdown controls, duplicate-signal protection, open-position reconciliation, session filters, persistent audit logs, and broker-specific filling-mode handling.
-
-The monitoring connection state is currently held in memory. Replit deployments may restart or scale down, so users may need to reconnect. Persistent operational history should be stored in a database rather than the deployment filesystem.
+Before unattended live execution, Tyrwar still requires institutional backtesting, spread and slippage modelling, account-risk position sizing, daily drawdown controls, duplicate-signal protection, open-position reconciliation, session controls, durable audit history, and broker-specific execution validation.
